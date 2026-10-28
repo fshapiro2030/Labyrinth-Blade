@@ -178,7 +178,7 @@
   #lbTable th { color:#9fb0d0; font-size:11px; letter-spacing:2px; text-align:left; padding:4px 8px; }
   #lbTable td { padding:6px 8px; border-top:1px solid rgba(255,255,255,0.07); color:#e8ecf5; }
   #lbTable tr.me td { background:rgba(255,214,138,0.12); color:#ffd68a; font-weight:700; }
-  #lbName { background:#1c2436; border:1px solid #3a4766; border-radius:6px; color:#e8ecf5; padding:6px 10px; font-size:14px; width:180px; }
+  #lbName, #profileNameInput { background:#1c2436; border:1px solid #3a4766; border-radius:6px; color:#e8ecf5; padding:6px 10px; font-size:14px; width:180px; }
   #gameOverTitle { color:#ff5a5a; text-shadow:0 0 30px #ff5a5a66; }
   #victoryStats { color:#c3cde3; font-size:15px; margin-top:4px; }
 
@@ -343,6 +343,11 @@
   <div id="profileScreen" class="screen hidden">
     <div class="title" style="font-size:34px;">PROFILES</div>
     <div class="subtitle" id="profileMsg">Each profile keeps its own gold, upgrades, cosmetics and unlocked worlds</div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <span class="subtitle" style="margin:0; font-size:12px;">NAME</span>
+      <input id="profileNameInput" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Rename current profile">
+      <button class="lbBtn" id="btnSaveProfileName" style="padding:7px 16px;">SAVE</button>
+    </div>
     <div id="profileSlots"></div>
     <button class="play" id="btnProfileBack">BACK</button>
   </div>
@@ -2352,6 +2357,7 @@ let profileLoading = false, profileSaveTimer = null;
 
 function blankProfile(){
   return {
+    name:'',
     gold:0,
     upgrades:{ vitality:0, energy:0, power:0, swiftness:0, regen:0, fortune:0 },
     cosmetics:{ unlocked:['gold'], equipped:'gold' },
@@ -2362,7 +2368,9 @@ function blankProfile(){
   };
 }
 function snapshotProfile(){
+  const cur = profileStore.slots[profileStore.active];
   return {
+    name:(cur && cur.name) || '',
     gold, upgrades:{...upgrades},
     cosmetics:{ unlocked:[...cosmetics.unlocked], equipped:cosmetics.equipped },
     worldsUnlocked:[...worldsUnlocked], ascendedWorlds:[...ascendedWorlds],
@@ -2420,10 +2428,15 @@ function selectProfile(i){
   writeProfileStore();
   applyProfile(profileStore.slots[i]);
 }
+function profileLabel(i){
+  const sl = profileStore.slots[i];
+  return ((sl && sl.name) || ('PROFILE '+(i+1))).toUpperCase();
+}
 function renderProfileBar(){
-  document.getElementById('profileName').textContent = 'PROFILE '+(profileStore.active+1)+'  ·  🪙 '+gold;
+  document.getElementById('profileName').textContent = profileLabel(profileStore.active)+'  ·  🪙 '+gold;
 }
 function renderProfileSlots(msg){
+  document.getElementById('profileNameInput').value = (profileStore.slots[profileStore.active] && profileStore.slots[profileStore.active].name) || '';
   document.getElementById('profileMsg').textContent = msg || 'Each profile keeps its own gold, upgrades, cosmetics and unlocked worlds';
   const el = document.getElementById('profileSlots');
   el.innerHTML = '';
@@ -2432,7 +2445,7 @@ function renderProfileSlots(msg){
     const b = document.createElement('button');
     b.className = 'slotBtn' + (i===profileStore.active ? ' active' : '');
     const head = document.createElement('span');
-    head.textContent = 'PROFILE '+(i+1)+(i===profileStore.active?'  (current)':'');
+    head.textContent = profileLabel(i)+(i===profileStore.active?'  (current)':'');
     const sub = document.createElement('small');
     if(sl){
       const nw = Math.min(4,(sl.worldsUnlocked||[]).filter(Boolean).length);
@@ -2453,7 +2466,7 @@ document.getElementById('btnProfileBack').addEventListener('click', ()=>{
 });
 document.getElementById('btnQuitProfile').addEventListener('click', ()=>{
   document.getElementById('confirmQuitText').innerHTML =
-    'Profile '+(profileStore.active+1)+' will be wiped: its gold, upgrades, cosmetics and unlocked worlds.<br>Your other profiles and the leaderboard are not touched.';
+    profileLabel(profileStore.active)+' will be wiped: its gold, upgrades, cosmetics and unlocked worlds.<br>Your other profiles and the leaderboard are not touched.';
   document.getElementById('confirmQuitScreen').classList.remove('hidden');
 });
 document.getElementById('btnCancelQuit').addEventListener('click', ()=>{
@@ -2466,9 +2479,22 @@ document.getElementById('btnConfirmQuit').addEventListener('click', ()=>{
   writeProfileStore();
   applyProfile(profileStore.slots[i]);
   document.getElementById('confirmQuitScreen').classList.add('hidden');
-  renderProfileSlots('Profile '+(i+1)+' has been reset');
+  renderProfileSlots(profileLabel(i)+' has been reset');
   document.getElementById('profileScreen').classList.remove('hidden');
 });
+function saveProfileName(){
+  const el = document.getElementById('profileNameInput');
+  const name = String(el.value||'').replace(/[^\w .\-]/g,'').trim().slice(0,16);
+  el.value = name;
+  flushProfile();
+  const sl = profileStore.slots[profileStore.active];
+  if(sl){ sl.name = name; writeProfileStore(); }
+  renderProfileBar();
+  renderProfileSlots(name ? 'Renamed to '+name.toUpperCase() : 'Name cleared');
+}
+document.getElementById('btnSaveProfileName').addEventListener('click', saveProfileName);
+document.getElementById('profileNameInput').addEventListener('keydown', e=>{ e.stopPropagation(); if(e.key==='Enter') saveProfileName(); });
+document.getElementById('profileNameInput').addEventListener('keyup', e=>e.stopPropagation());
 window.addEventListener('beforeunload', flushProfile);
 document.addEventListener('visibilitychange', ()=>{ if(document.hidden) flushProfile(); });
 
