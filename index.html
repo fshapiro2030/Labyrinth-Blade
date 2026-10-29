@@ -266,7 +266,7 @@
       <canvas id="minimap" width="210" height="210"></canvas>
     </div>
     <div id="hint">
-      <span class="key">WASD</span> move &nbsp; <span class="key">MOUSE</span> aim &nbsp;
+      <span class="key">WASD</span> move &nbsp; <span class="key">MOUSE</span> or <span class="key">Q</span>/<span class="key">E</span> aim &nbsp;
       <span class="key">CLICK</span>/<span class="key">SPACE</span> strike &nbsp; <span class="key">SHIFT</span>/<span class="key">CTRL</span> dash &nbsp;
       <span class="key">🛒 SHOP</span> upgrades &amp; cosmetics
     </div>
@@ -280,6 +280,8 @@
       <p>
         <span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> — move through the labyrinth<br>
         <span class="key">MOUSE</span> — aim your blade<br>
+        <span class="key">Q</span> / <span class="key">E</span> — turn your aim left / right without a mouse<br>
+        <span class="key">F</span> — toggle auto-aim (locks onto the nearest enemy in sight)<br>
         <span class="key">LEFT CLICK</span> or <span class="key">SPACE</span> — strike<br>
         <span class="key">SHIFT</span> or <span class="key">CTRL</span> — dash (costs energy, brief invulnerability; Ctrl is handy if you're keeping one hand on WASD)<br>
         Defeat every guardian on a floor, then reach the glowing portal to descend deeper. Each depth grows larger and deadlier.
@@ -929,6 +931,7 @@ window.addEventListener('keydown', e=>{
   lastInput='key';
   keys[e.key.toLowerCase()]=true;
   if(e.key===' '){ tryAttack(); e.preventDefault(); }
+  if((e.key==='f'||e.key==='F') && state==='playing' && !e.repeat && !e.ctrlKey && !e.metaKey) toggleAutoAim();
   if(e.ctrlKey && /^[wasd]$/i.test(e.key)) e.preventDefault(); // dash-via-Ctrl shouldn't trigger browser shortcuts (Ctrl+W closes tab, etc.)
   if(state==='shop' && shopManualOpen && e.key==='Escape'){ closeShop(); return; }
   if(state!=='playing') return;
@@ -969,6 +972,7 @@ window.addEventListener('keydown', e=>{
 // ---------- GAMEPAD ----------
 const pad = {mx:0,my:0,aim:0,hasAim:false,attack:false,dash:false};
 let padCodeBuf = '', padWarpN = 0, lastInput = 'key';
+let autoAim = false;
 let padPrev = {}, aimSource = 'mouse', crossSel = 0, shopSel = 0, padNavCool = 0;
 function stick(x,y,dz){
   const m = Math.hypot(x,y);
@@ -1009,6 +1013,7 @@ function pollPad(dt){
     }
     if(pad.attack || m>0.1) { if(pad.attack||pad.hasAim) aimSource='pad'; }
     if(edge(3)||edge(9)) openShop(true);
+    if(edge(11)) toggleAutoAim();
 
     // secret controller codes (d-pad + A/B/X, never shown in the UI)
     const tok = edge(12)?'U':edge(13)?'D':edge(14)?'L':edge(15)?'R':edge(0)?'A':edge(1)?'B':edge(2)?'X':'';
@@ -1106,6 +1111,11 @@ function togglePhase(){
   const el = document.getElementById('phaseIndicator');
   el.style.display = phaseMode ? 'block' : 'none';
   floatText(player.x, player.y-30, phaseMode?'PHASE ON':'PHASE OFF', phaseMode?'#c8b0ff':'#ff8a8a');
+}
+
+function toggleAutoAim(){
+  autoAim = !autoAim;
+  floatText(player.x, player.y-30, autoAim?'AUTO-AIM ON':'AUTO-AIM OFF', autoAim?'#7ad6ff':'#ff8a8a');
 }
 
 function toggleSpin(){
@@ -1266,8 +1276,18 @@ function update(dt){
   // aim angle from mouse (world space)
   const cam = getCamera(false);
   mouse.worldX = mouse.x+cam.camX; mouse.worldY = mouse.y+cam.camY;
-  if(aimSource==='pad'){ if(pad.hasAim || moving) player.angle = pad.aim; }
-  else player.angle = Math.atan2(mouse.worldY-player.y, mouse.worldX-player.x);
+  const aimRot = (keys['e']?1:0) - (keys['q']?1:0);
+  if(aimRot){ aimSource='key'; player.angle = normalizeAngle(player.angle + aimRot*4.6*dt); }
+  if(autoAim){
+    let bestEn=null, bestD=360;
+    for(const en of enemies){
+      if(!en.alive) continue;
+      const d = Math.hypot(en.x-player.x, en.y-player.y);
+      if(d<bestD && hasLineOfSight(player.x,player.y,en.x,en.y)){ bestD=d; bestEn=en; }
+    }
+    if(bestEn) player.angle = Math.atan2(bestEn.y-player.y, bestEn.x-player.x);
+  } else if(aimSource==='pad'){ if(pad.hasAim || moving) player.angle = pad.aim; }
+  else if(aimSource==='mouse') player.angle = Math.atan2(mouse.worldY-player.y, mouse.worldX-player.x);
   if(pad.attack) tryAttack();
 
   if(player.attackCooldown>0) player.attackCooldown-=dt;
@@ -2026,6 +2046,22 @@ function render(){
     ctx.stroke();
     ctx.restore();
     ctx.shadowBlur=0;
+  }
+
+  // aim marker when not using the mouse, so the facing direction is always visible
+  if(aimSource!=='mouse' || autoAim){
+    ctx.save();
+    ctx.translate(player.x,player.y);
+    ctx.rotate(player.angle);
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = autoAim ? '#7ad6ff' : '#ffd68a';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(34,-7); ctx.lineTo(44,0); ctx.lineTo(34,7);
+    ctx.stroke();
+    ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   // player drop shadow (stays grounded, not affected by bob)
