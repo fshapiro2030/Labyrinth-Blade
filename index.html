@@ -159,6 +159,13 @@
   button.play:hover { transform:translateY(-2px) scale(1.03); }
   button.play:active { transform:translateY(1px) scale(0.98); }
 
+  #bossBar { display:none; position:absolute; bottom:72px; left:50%; transform:translateX(-50%); width:min(560px,86vw); text-align:center; pointer-events:none; }
+  #bossName { color:#ffd68a; font-size:14px; font-weight:800; letter-spacing:6px; text-shadow:0 0 14px #000, 0 0 10px #ffb34788; margin-bottom:6px; }
+  #bossPhase { font-size:11px; letter-spacing:3px; color:#ff9a9a; margin-left:10px; }
+  #bossTrack { position:relative; height:14px; background:rgba(0,0,0,0.65); border:1px solid rgba(255,214,138,0.55); border-radius:7px; overflow:hidden; }
+  #bossFill { height:100%; width:100%; background:linear-gradient(90deg,#7a1020,#ff7a3a 70%,#ffd68a); transition:width .12s linear; }
+  #bossFill.immune { background:linear-gradient(90deg,#5a6a88,#cfe3ff); }
+  #bossTrack i { position:absolute; top:0; bottom:0; width:2px; background:rgba(255,255,255,0.55); }
   button.lbBtn {
     background:rgba(255,255,255,0.06); border:1px solid rgba(255,214,138,0.45); color:#ffd68a;
     border-radius:10px; padding:10px 28px; font-size:13px; font-weight:800; letter-spacing:3px; cursor:pointer;
@@ -249,6 +256,7 @@
       <div class="bar-shell"><div id="hpFill" class="bar-fill hp-fill" style="width:100%"></div><div class="bar-label">HP</div><div class="bar-pct" id="hpPct">100%</div></div>
       <div class="bar-shell"><div id="stFill" class="bar-fill st-fill" style="width:100%"></div><div class="bar-label">ENERGY</div></div>
       <div id="combo"></div>
+      <div id="bossBar"><div id="bossName"><span id="bossTitle"></span><span id="bossPhase"></span></div><div id="bossTrack"><div id="bossFill"></div><i style="left:34%"></i><i style="left:67%"></i></div></div>
     </div>
     <div id="cheatIndicator">⚡ OVERDRIVE ⚡</div>
     <div id="phaseIndicator">👻 PHASE ⟳ WALLS 👻</div>
@@ -767,6 +775,7 @@ function computeBaseStats(){
 }
 
 function spawnLevel(lv){
+  document.getElementById('bossBar').style.display='none';
   const c = Math.min(18 + Math.floor(lv*2), 58);
   const r = Math.min(14 + Math.floor(lv*1.6), 44);
   makeMaze(c,r);
@@ -849,7 +858,7 @@ function spawnLevel(lv){
   enemies=[];
   const isBossLevel = (lv === BOSS_LEVEL);
   const W = WORLDS[currentWorld];
-  const enemyCount = isBossLevel ? 8 : Math.min(4+Math.floor(lv*1.12)+(getStoryPath().enemyCountBonus||0), 28);
+  const enemyCount = isBossLevel ? 5 : Math.min(4+Math.floor(lv*1.12)+(getStoryPath().enemyCountBonus||0), 28);
   const cellsFlat=[];
   for(let y=0;y<r;y++) for(let x=0;x<c;x++) if(field[y][x] > 5){
     // keep a wide berth around the hidden tablet
@@ -886,8 +895,8 @@ function spawnLevel(lv){
     enemies.push({
       x:(best.x+0.5)*CELL, y:(best.y+0.5)*CELL,
       radius:32,
-      hp:1300*W.difficulty, maxHp:1300*W.difficulty,
-      speed:130,
+      hp:3800*W.difficulty, maxHp:3800*W.difficulty,
+      speed:120,
       type:'boss',
       name: W.bossName,
       bossBody: W.bossBody, bossOutline: W.bossOutline, bossCrack: W.bossCrack, bossEye: W.bossEye,
@@ -1195,6 +1204,7 @@ function tryAttack(){
 function normalizeAngle(a){ while(a>Math.PI)a-=Math.PI*2; while(a<-Math.PI)a+=Math.PI*2; return a; }
 
 function damageEnemy(en, dmg, nx, ny, isCrit){
+  if(en.shield>0 && dmg < en.maxHp*5){ floatText(en.x, en.y-40, 'IMMUNE', '#cfe3ff'); return; }
   en.hp -= dmg;
   en.hitFlash = 0.2;
   spawnParticles(en.x, en.y, isCrit?18:10, isCrit?'#ffe15a':'#ffb347', isCrit?130:90);
@@ -1203,6 +1213,7 @@ function damageEnemy(en, dmg, nx, ny, isCrit){
   sfx.hit();
   if(en.hp<=0 && en.alive){
     en.alive=false; runKills++;
+    if(en.type==='boss') document.getElementById('bossBar').style.display='none';
     spawnParticles(en.x, en.y, en.type==='boss'?44:26, en.type==='ranged'?'#c07bff':(en.type==='boss'?'#ffd166':'#ff6b6b'), en.type==='boss'?220:160);
     score += 100 + level*10;
     const goldGain = en.type==='boss' ? 80+level*5 : 6+Math.floor(level*0.5);
@@ -1322,6 +1333,12 @@ function update(dt){
     if(cheatMode && dist < en.radius+player.radius+6){
       damageEnemy(en, en.maxHp*10, dx/(dist||1), dy/(dist||1), false);
       floatText(en.x, en.y-10, 'SMITE', '#7dffb0');
+      continue;
+    }
+
+    if(en.type==='boss'){
+      updateBoss(en, dt, dist);
+      if(en.attackCooldown>0) en.attackCooldown-=dt;
       continue;
     }
 
@@ -1702,6 +1719,179 @@ function hurtPlayer(nx, ny, attacker){
   updateHUD();
 }
 
+// ---------- BOSS ----------
+// the boss bar is declared inside the top-left panel, which is dimmed and flows in a column; hang it off the HUD root instead
+document.getElementById('hud').appendChild(document.getElementById('bossBar'));
+
+function bfsStep(en, dist, speed, dt){
+  const ecx=Math.max(0,Math.min(cols-1,Math.floor(en.x/CELL)));
+  const ecy=Math.max(0,Math.min(rows-1,Math.floor(en.y/CELL)));
+  const d0 = distField[ecy] ? distField[ecy][ecx] : Infinity;
+  let best=null, bestD=d0;
+  const c=cells[ecy][ecx];
+  const neigh=[];
+  if(!c.N) neigh.push([ecx,ecy-1]);
+  if(!c.S) neigh.push([ecx,ecy+1]);
+  if(!c.E) neigh.push([ecx+1,ecy]);
+  if(!c.W) neigh.push([ecx-1,ecy]);
+  for(const [nx,ny] of neigh){
+    if(nx<0||ny<0||nx>=cols||ny>=rows) continue;
+    const d = distField[ny][nx];
+    if(d<bestD){ bestD=d; best=[nx,ny]; }
+  }
+  let tx=player.x, ty=player.y;
+  if(best){ tx=(best[0]+0.5)*CELL; ty=(best[1]+0.5)*CELL; }
+  if(dist < CELL*0.9){ tx=player.x; ty=player.y; }
+  const a=Math.atan2(ty-en.y,tx-en.x);
+  en.angle=a;
+  moveWithCollision(en, Math.cos(a)*speed*dt, Math.sin(a)*speed*dt);
+}
+
+function bossShot(en, ang, speed){
+  projectiles.push({x:en.x,y:en.y,vx:Math.cos(ang)*speed,vy:Math.sin(ang)*speed,life:3,owner:en,color:en.bossCrack});
+}
+
+function spawnBossMinions(en, n){
+  const W = WORLDS[currentWorld];
+  for(let i=0;i<n;i++){
+    const a = Math.random()*Math.PI*2;
+    let x = en.x+Math.cos(a)*70, y = en.y+Math.sin(a)*70;
+    if(!hasLineOfSight(en.x,en.y,x,y)){ x=en.x; y=en.y; }
+    const hp = (35+level*6.4)*W.difficulty*0.6;
+    enemies.push({
+      x, y, radius:15, hp, maxHp:hp,
+      speed:(65+level*2)*Math.min(W.difficulty,1.25),
+      type:'melee', name:W.meleeName, color:W.meleeColor, colorChase:W.meleeColorChase,
+      outline:W.meleeOutline, hornColor:W.meleeHornColor, eyeColor:W.rangedEye,
+      state:'chase', angle:0, wanderTarget:null, attackCooldown:1, hitFlash:0, alive:true,
+      bobPhase:Math.random()*Math.PI*2
+    });
+  }
+  updateEnemyTag();
+}
+
+function updateBoss(en, dt, dist){
+  if(!en.b) en.b = {state:'chase', t:0, dur:1, phase:1, atkT:1.8, last:'', spiralA:0, spiralT:0, dir:0};
+  const b = en.b;
+  if(en.shield>0) en.shield -= dt;
+  const frac = en.hp/en.maxHp;
+  const ph = frac<0.34 ? 3 : (frac<0.67 ? 2 : 1);
+  const toP = Math.atan2(player.y-en.y, player.x-en.x);
+
+  // phase change: brief shield, roar, reinforcements
+  if(ph>b.phase){
+    b.phase = ph; b.state='enrage'; b.t=b.dur=1.7; en.shield=1.7;
+    spawnBossMinions(en, ph===2 ? 2 : 3);
+    camShake = 22;
+    floatText(en.x, en.y-60, ph===2 ? 'ENRAGED!' : 'FINAL FURY!', en.bossCrack);
+    sfx.portal();
+  }
+
+  b.t -= dt;
+  const spdMul = 1 + 0.2*(b.phase-1);
+  const hitPlayer = ()=>{ hurtPlayer((player.x-en.x)/(dist||1), (player.y-en.y)/(dist||1), en); };
+
+  if(b.state!=='charge_wind' && b.state!=='charge') en.angle = toP;
+  if(dist < en.radius+player.radius+16 && en.attackCooldown<=0 && b.state!=='enrage'){
+    en.attackCooldown = 0.8; hitPlayer();
+  }
+
+  if(b.state==='chase'){
+    bfsStep(en, dist, en.speed*spdMul, dt);
+    b.atkT -= dt;
+    if(b.atkT<=0){
+      const pool = b.phase===1 ? ['fan','charge'] : b.phase===2 ? ['fan','nova','charge','slam'] : ['fan','nova','charge','slam','spiral'];
+      const opts = pool.filter(x=>x!==b.last);
+      const pick = opts[Math.floor(Math.random()*opts.length)];
+      b.last = pick;
+      b.atkT = Math.max(1.2, 2.8 - 0.4*b.phase);
+      if(pick==='fan'){
+        const n = 3 + 2*(b.phase-1);
+        for(let i=0;i<n;i++) bossShot(en, toP + (i-(n-1)/2)*0.26, 200+25*b.phase);
+        sfx.shoot(); floatText(en.x, en.y-40, '!!!', en.bossCrack);
+      } else if(pick==='nova'){ b.state='nova'; b.t=b.dur=0.9; floatText(en.x,en.y-40,'NOVA!', en.bossCrack); }
+      else if(pick==='charge'){ b.state='charge_wind'; b.t=b.dur=0.8; b.dir=toP; floatText(en.x,en.y-40,'CHARGE!', en.bossCrack); }
+      else if(pick==='slam'){ b.state='slam'; b.t=b.dur=1.0; floatText(en.x,en.y-40,'SLAM!', en.bossCrack); }
+      else if(pick==='spiral'){ b.state='spiral'; b.t=b.dur=2.6; b.spiralT=0; }
+    }
+  } else if(b.state==='nova'){
+    if(b.t<=0){
+      const n = 12 + 4*b.phase, off = Math.random()*6.28;
+      for(let i=0;i<n;i++) bossShot(en, off + i*6.2832/n, 170);
+      sfx.shoot(); camShake = 10; b.state='chase';
+    }
+  } else if(b.state==='charge_wind'){
+    en.angle = b.dir;
+    if(b.t<=0){ b.state='charge'; b.t=b.dur=0.55; }
+  } else if(b.state==='charge'){
+    const px=en.x, py=en.y, sp=560+40*b.phase;
+    moveWithCollision(en, Math.cos(b.dir)*sp*dt, Math.sin(b.dir)*sp*dt);
+    en.angle = b.dir;
+    const moved = Math.hypot(en.x-px, en.y-py);
+    if(dist < en.radius+player.radius+10 && en.attackCooldown<=0){ en.attackCooldown=0.5; hitPlayer(); }
+    if(moved < sp*dt*0.4){
+      camShake = 20; spawnParticles(en.x,en.y,16,en.bossCrack,160);
+      b.state='recover'; b.t=b.dur=1.5; floatText(en.x,en.y-50,'EXPOSED', '#ffe9a8');
+    } else if(b.t<=0){ b.state='recover'; b.t=b.dur=0.9; }
+  } else if(b.state==='recover'){
+    if(b.t<=0) b.state='chase';
+  } else if(b.state==='slam'){
+    if(b.t<=0){
+      camShake = 24; sfx.hit();
+      spawnParticles(en.x,en.y,30,en.bossCrack,260);
+      if(dist < 150+player.radius) hitPlayer();
+      b.state='chase';
+    }
+  } else if(b.state==='spiral'){
+    b.spiralT -= dt;
+    if(b.spiralT<=0){
+      b.spiralT = 0.09; b.spiralA += 0.55;
+      for(let k=0;k<2;k++) bossShot(en, b.spiralA + k*Math.PI, 185);
+      if(b.phase===3) for(let k=0;k<2;k++) bossShot(en, b.spiralA + Math.PI/2 + k*Math.PI, 185);
+    }
+    if(b.t<=0) b.state='chase';
+  } else if(b.state==='enrage'){
+    if(b.t<=0){ b.state='chase'; b.atkT=1.2; }
+  }
+
+  // boss health bar
+  const bar = document.getElementById('bossBar');
+  bar.style.display = 'block';
+  document.getElementById('bossTitle').textContent = en.name.toUpperCase();
+  document.getElementById('bossPhase').textContent = b.phase===1 ? '' : (b.phase===2 ? 'ENRAGED' : 'FINAL FURY');
+  const fill = document.getElementById('bossFill');
+  fill.style.width = Math.max(0,frac*100)+'%';
+  fill.classList.toggle('immune', en.shield>0);
+}
+
+function drawBossTelegraph(en){
+  const b = en.b; if(!b) return;
+  const k = Math.max(0, Math.min(1, 1 - b.t/(b.dur||1)));
+  ctx.save();
+  ctx.translate(en.x, en.y);
+  if(b.state==='nova'){
+    ctx.strokeStyle = en.bossCrack; ctx.globalAlpha = 0.25+0.5*k; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(0,0,40+k*130,0,7); ctx.stroke();
+  } else if(b.state==='charge_wind'){
+    ctx.rotate(b.dir);
+    ctx.fillStyle = 'rgba(255,60,60,'+(0.12+0.3*k)+')';
+    ctx.fillRect(0,-26,560,52);
+  } else if(b.state==='slam'){
+    ctx.fillStyle = 'rgba(255,60,60,'+(0.08+0.25*k)+')';
+    ctx.strokeStyle = 'rgba(255,120,120,'+(0.4+0.5*k)+')'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(0,0,150,0,7); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,60,60,'+(0.25+0.3*k)+')';
+    ctx.beginPath(); ctx.arc(0,0,150*k,0,7); ctx.fill();
+  } else if(b.state==='enrage'){
+    ctx.strokeStyle = '#cfe3ff'; ctx.globalAlpha = 0.8-0.5*k; ctx.lineWidth=5;
+    ctx.beginPath(); ctx.arc(0,0,en.radius*1.5+k*120,0,7); ctx.stroke();
+  } else if(b.state==='recover'){
+    ctx.strokeStyle = '#ffe9a8'; ctx.globalAlpha = 0.6; ctx.lineWidth=3; ctx.setLineDash([6,6]);
+    ctx.beginPath(); ctx.arc(0,0,en.radius*1.5,0,7); ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function updateHUD(){
   document.getElementById('hpFill').style.width = Math.max(0,player.hp)+'%';
   document.getElementById('hpPct').textContent = Math.max(0,Math.round(player.hp))+'%';
@@ -1874,11 +2064,14 @@ function render(){
 
   // projectiles
   for(const p of projectiles){
-    const pc = p.reflected ? '#ffd68a' : '#c07bff';
+    const pc = p.reflected ? '#ffd68a' : (p.color || '#c07bff');
     ctx.fillStyle=pc; ctx.shadowColor=pc; ctx.shadowBlur=12;
     ctx.beginPath(); ctx.arc(p.x,p.y,5,0,7); ctx.fill();
   }
   ctx.shadowBlur=0;
+
+  // boss attack telegraphs (drawn under the enemies)
+  for(const en of enemies){ if(en.alive && en.type==='boss') drawBossTelegraph(en); }
 
   // enemies
   for(const en of enemies){
