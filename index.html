@@ -998,9 +998,11 @@ function pollPad(dt){
   const edge = i => down(i) && !padPrev[i];
   if(gp.buttons.some(b=>b&&b.pressed) || gp.axes.some(a=>Math.abs(a)>0.5)) lastInput='pad';
   const [lx,ly] = stick(gp.axes[0]||0, gp.axes[1]||0, 0.22);
-  const [rx,ry] = stick(gp.axes[2]||0, gp.axes[3]||0, 0.3);
+  let [rx,ry] = stick(gp.axes[2]||0, gp.axes[3]||0, 0.3);
+  if(!rx && !ry && gp.mapping!=='standard') [rx,ry] = stick(gp.axes[3]||0, gp.axes[4]||0, 0.3); // some browsers/pads put the right stick on axes 3 and 4
   let dx = lx, dy = ly;
-  // the d-pad is reserved for the secret codes: it never moves, aims or navigates menus
+  // during play the d-pad is reserved for the secret codes; in menus it navigates like the left stick
+  if(state!=='playing'){ if(down(14)) dx -= 1; if(down(15)) dx += 1; if(down(12)) dy -= 1; if(down(13)) dy += 1; }
   padNavCool = Math.max(0, padNavCool-dt);
 
   if(state==='playing'){
@@ -1060,7 +1062,12 @@ function pollPad(dt){
       shopSel = Math.min(shopSel, items.length-1);
       items.forEach((it,i)=>{ it.style.outline = i===shopSel ? '2px solid #ffd68a' : ''; });
       // right stick scrolls the shop panel freely
-      if(ry!==0){ const panel = document.querySelector('#shopScreen .panel'); if(panel) panel.scrollTop += ry*900*dt; }
+      const panel = document.querySelector('#shopScreen .panel');
+      if(panel){
+        if(ry!==0) panel.scrollTop += ry*900*dt;
+        if(edge(4)) panel.scrollBy({top:-panel.clientHeight*0.8, behavior:'smooth'});
+        if(edge(5)) panel.scrollBy({top: panel.clientHeight*0.8, behavior:'smooth'});
+      }
       if(edge(0)){
         const it = items[shopSel];
         const btn = it.querySelector('button');
