@@ -241,7 +241,10 @@
     width:120px; border-radius:10px; padding:10px 8px; text-align:center;
     background:rgba(255,255,255,0.03); border:2px solid rgba(255,255,255,0.1);
   }
-  .world-node.unlocked { border-color:rgba(255,207,110,0.4); }
+  .world-node.unlocked { border-color:rgba(255,207,110,0.4); cursor:pointer; }
+  .world-node.unlocked:hover { border-color:rgba(255,214,138,0.8); }
+  .world-node.selected { border-color:#ffd68a; box-shadow:0 0 16px rgba(255,214,138,0.5); background:rgba(255,214,138,0.08); }
+  #worldHint { font-size:11px; letter-spacing:2px; color:#8fa3c7; }
   .world-node.locked { opacity:0.5; }
   .world-node .world-swatch { width:26px; height:26px; border-radius:50%; margin:0 auto 6px; }
   .world-node .world-name { font-size:11px; font-weight:700; color:#e8ecf5; }
@@ -297,6 +300,7 @@
       </p>
     </div>
     <div id="worldRoadmap" class="world-roadmap"></div>
+    <div id="worldHint"></div>
     <div class="profile-bar">
       <span id="profileName"></span>
       <button class="lbBtn" id="btnSwitchProfile">SWITCH PROFILE</button>
@@ -704,6 +708,7 @@ const UPGRADE_DEFS = [
   { id:'regen',     name:'Second Wind',desc:'+1 HP/sec Regen',   baseCost:10, growth:1.25, max:8 },
   { id:'fortune',   name:'Fortune',    desc:'+1% Crit Chance',   baseCost:14, growth:1.25, max:10 },
 ];
+let upgradeWorld = 0; // which world the current upgrades were earned in
 let upgrades = { vitality:0, energy:0, power:0, swiftness:0, regen:0, fortune:0 };
 const COSMETICS = {
   gold:    { name:'Gold Knight',    cost:0,  body:'#ffc24a', outline:'#5c3a0a', cape:'#2c4c96', crest:'#e8506a', gem:'#5aa8ff' },
@@ -940,6 +945,14 @@ function updateGoldTag(){
 // ---------- INPUT ----------
 window.addEventListener('keydown', e=>{
   lastInput='key';
+  if(state==='menu'){
+    const open = [...document.querySelectorAll('.screen:not(.hidden)')];
+    if(open.length===1 && open[0].id==='startScreen' && !e.ctrlKey && !e.metaKey && !e.altKey){
+      const k = e.key.toLowerCase();
+      if(k==='arrowleft'||k==='a'){ cycleWorld(-1); e.preventDefault(); }
+      else if(k==='arrowright'||k==='d'){ cycleWorld(1); e.preventDefault(); }
+    }
+  }
   keys[e.key.toLowerCase()]=true;
   if(e.key===' '){ tryAttack(); e.preventDefault(); }
   if((e.key==='f'||e.key==='F') && state==='playing' && !e.repeat && !e.ctrlKey && !e.metaKey) toggleAutoAim();
@@ -1011,6 +1024,7 @@ function padMenu(edge, dx, dy){
     menuSel = (menuSel+step+btns.length) % btns.length;
     padNavCool = 0.22;
   }
+  if(top.id==='startScreen'){ if(edge(4)) cycleWorld(-1); if(edge(5)) cycleWorld(1); }
   btns[menuSel].classList.add('padFocus');
   if(edge(0)||edge(9)) btns[menuSel].click();
   else if(edge(1)){
@@ -2644,7 +2658,8 @@ function blankProfile(){
     worldsUnlocked:[true,false,false,false,false,false],
     ascendedWorlds:[false,false,false,false],
     voidAscended:false,
-    currentWorld:0
+    currentWorld:0,
+    upgradeWorld:0
   };
 }
 function snapshotProfile(){
@@ -2654,7 +2669,7 @@ function snapshotProfile(){
     gold, upgrades:{...upgrades},
     cosmetics:{ unlocked:[...cosmetics.unlocked], equipped:cosmetics.equipped },
     worldsUnlocked:[...worldsUnlocked], ascendedWorlds:[...ascendedWorlds],
-    voidAscended, currentWorld
+    voidAscended, currentWorld, upgradeWorld
   };
 }
 function readProfileStore(){
@@ -2685,6 +2700,7 @@ function applyProfile(pr){
   ascendedWorlds = b.ascendedWorlds.map((v,i)=> !!(pr.ascendedWorlds && pr.ascendedWorlds[i]));
   voidAscended = !!pr.voidAscended;
   currentWorld = (pr.currentWorld>=0 && pr.currentWorld<WORLDS.length && worldsUnlocked[pr.currentWorld]) ? pr.currentWorld : 0;
+  upgradeWorld = (pr.upgradeWorld>=0 && pr.upgradeWorld<WORLDS.length) ? pr.upgradeWorld : currentWorld;
   profileLoading = false;
   document.getElementById('goldTag').textContent = '🪙 '+gold;
   renderWorldRoadmap();
@@ -2782,6 +2798,9 @@ document.addEventListener('visibilitychange', ()=>{ if(document.hidden) flushPro
 function startRun(worldIdx, resetUpgrades){
   setTimeout(saveProfile, 50);
   runUsedCheats = false; runKills = 0; runSubmitted = false;
+  // starting a different world than the one your upgrades were earned in resets them (gold and cosmetics stay)
+  if(worldIdx !== upgradeWorld) resetUpgrades = true;
+  upgradeWorld = worldIdx;
   currentWorld = worldIdx;
   level=1; score=0; comboCount=0; storyChoice=null;
   if(resetUpgrades){ upgrades = { vitality:0, energy:0, power:0, swiftness:0, regen:0, fortune:0 }; }
@@ -2839,21 +2858,37 @@ document.getElementById('btnCancelTitle').addEventListener('click', ()=>{
   document.getElementById('confirmTitleScreen').classList.add('hidden');
 });
 
+function selectWorld(i){
+  if(!worldsUnlocked[i]) return;
+  currentWorld = i;
+  renderWorldRoadmap();
+  saveProfile();
+}
+function cycleWorld(dir){
+  const open = WORLDS.map((w,i)=>i).filter(i=>worldsUnlocked[i]);
+  if(open.length<2) return;
+  const at = Math.max(0, open.indexOf(currentWorld));
+  selectWorld(open[(at+dir+open.length)%open.length]);
+}
 function renderWorldRoadmap(){
   const el = document.getElementById('worldRoadmap');
   el.innerHTML = '';
+  let openCount = 0;
   WORLDS.forEach((w, i)=>{
     if(w.secret && !worldsUnlocked[i]) return; // true secret - don't even hint it exists
     const unlocked = worldsUnlocked[i];
+    if(unlocked) openCount++;
     const node = document.createElement('div');
-    node.className = 'world-node ' + (unlocked ? 'unlocked' : 'locked');
+    node.className = 'world-node ' + (unlocked ? 'unlocked' : 'locked') + (unlocked && i===currentWorld ? ' selected' : '');
     node.innerHTML = `
       <div class="world-swatch" style="background:${w.meleeColor};"></div>
       <div class="world-name">${unlocked ? w.name : '???'}</div>
       <div class="world-tag">${unlocked ? w.tagline : 'Locked'}</div>
     `;
+    if(unlocked) node.addEventListener('click', ()=>selectWorld(i));
     el.appendChild(node);
   });
+  document.getElementById('worldHint').textContent = openCount>1 ? 'CLICK A WORLD  ·  ← →  ·  A / D  ·  LB / RB  TO CHOOSE WHERE TO START' : '';
 }
 readProfileStore();
 if(!profileStore.slots[profileStore.active]) profileStore.slots[profileStore.active] = blankProfile();
