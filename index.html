@@ -171,6 +171,7 @@
     border-radius:10px; padding:10px 28px; font-size:13px; font-weight:800; letter-spacing:3px; cursor:pointer;
   }
   button.lbBtn:hover { background:rgba(255,214,138,0.15); }
+  .padFocus { outline:3px solid #ffd68a; outline-offset:3px; }
   button.lbBtn.danger { border-color:rgba(255,120,120,0.55); color:#ff9a9a; }
   button.lbBtn.danger:hover { background:rgba(255,120,120,0.15); }
   .profile-bar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; justify-content:center; }
@@ -932,6 +933,7 @@ function updateEnemyTag(){
 
 function updateGoldTag(){
   saveProfile();
+  renderProfileBar();
   document.getElementById('goldTag').textContent = '🪙 '+gold;
 }
 
@@ -989,6 +991,34 @@ function stick(x,y,dz){
   const k = Math.min(1,(m-dz)/(1-dz))/m;
   return [x*k, y*k];
 }
+let menuSel = 0, menuScreenId = '';
+function padMenu(edge, dx, dy){
+  const screens = [...document.querySelectorAll('.screen:not(.hidden)')];
+  const top = screens[screens.length-1];
+  document.querySelectorAll('.padFocus').forEach(b=>b.classList.remove('padFocus'));
+  if(!top) return;
+  const btns = [...top.querySelectorAll('button')].filter(b=>b.offsetParent!==null && !b.disabled);
+  if(!btns.length) return;
+  if(menuScreenId !== top.id){
+    menuScreenId = top.id;
+    const pi = btns.findIndex(b=>b.classList.contains('play'));
+    const ai = btns.findIndex(b=>b.classList.contains('active'));
+    menuSel = top.id==='profileScreen' ? Math.max(0,ai) : (pi>=0 ? pi : 0);
+  }
+  menuSel = Math.min(menuSel, btns.length-1);
+  if(padNavCool<=0 && (Math.abs(dx)>0.5 || Math.abs(dy)>0.5)){
+    const step = (dy>0.5 || dx>0.5) ? 1 : -1;
+    menuSel = (menuSel+step+btns.length) % btns.length;
+    padNavCool = 0.22;
+  }
+  btns[menuSel].classList.add('padFocus');
+  if(edge(0)||edge(9)) btns[menuSel].click();
+  else if(edge(1)){
+    const back = {profileScreen:'btnProfileBack', lbScreen:'btnLbClose', confirmQuitScreen:'btnCancelQuit', confirmTitleScreen:'btnCancelTitle'}[top.id];
+    if(back) document.getElementById(back).click();
+  }
+}
+
 function pollPad(dt){
   pad.mx=pad.my=0; pad.hasAim=false; pad.attack=false; pad.dash=false;
   let gp=null;
@@ -1005,7 +1035,15 @@ function pollPad(dt){
   if(state!=='playing'){ if(down(14)) dx -= 1; if(down(15)) dx += 1; if(down(12)) dy -= 1; if(down(13)) dy += 1; }
   padNavCool = Math.max(0, padNavCool-dt);
 
-  if(state==='playing'){
+  const confirmTitleOpen = !document.getElementById('confirmTitleScreen').classList.contains('hidden');
+  const confirmQuitOpen = !document.getElementById('confirmQuitScreen').classList.contains('hidden');
+  if(confirmTitleOpen){
+    // confirm dialog on top: A = yes, B = cancel (even over the shop or a level)
+    if(edge(0)||edge(9)) document.getElementById('btnConfirmTitle').click();
+    else if(edge(1)) document.getElementById('btnCancelTitle').click();
+  } else if(confirmQuitOpen){
+    padMenu(edge, dx, dy);   // CANCEL is pre-selected; move to RESET PROFILE and press A to confirm
+  } else if(state==='playing'){
     const m = Math.hypot(dx,dy);
     if(m>0){ pad.mx = dx/Math.max(1,m); pad.my = dy/Math.max(1,m); }
     if(Math.hypot(rx,ry)>0){ pad.aim = Math.atan2(ry,rx); pad.hasAim=true; aimSource='pad'; }
@@ -1083,15 +1121,14 @@ function pollPad(dt){
       if(edge(0)||edge(9)) opts[crossSel].click();
     }
   } else {
-    // title / game over / victory / confirm dialogs
-    const screens = [...document.querySelectorAll('.screen:not(.hidden)')];
-    const top = screens[screens.length-1];
-    if(top){
-      const btns = [...top.querySelectorAll('button.play')].filter(b=>b.offsetParent!==null);
-      if(edge(0)||edge(9)){ if(btns[0]) btns[0].click(); }
-      else if(edge(1) && top.id==='confirmTitleScreen'){ document.getElementById('btnCancelTitle').click(); }
-      else if(edge(1) && top.id==='confirmQuitScreen'){ document.getElementById('btnCancelQuit').click(); }
-    }
+    // title / profiles / leaderboard / game over / victory
+    padMenu(edge, dx, dy);
+  }
+  // X acts as the 🏠 home button on every screen except during play (where X is the strike button)
+  if(state!=='playing' && state!=='menu' && edge(2)
+     && document.getElementById('confirmTitleScreen').classList.contains('hidden')
+     && document.getElementById('confirmQuitScreen').classList.contains('hidden')){
+    returnToTitle();
   }
   padPrev = {};
   for(let i=0;i<gp.buttons.length;i++) padPrev[i]=down(i);
