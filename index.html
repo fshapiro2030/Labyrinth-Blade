@@ -171,6 +171,20 @@
     border-radius:10px; padding:10px 28px; font-size:13px; font-weight:800; letter-spacing:3px; cursor:pointer;
   }
   button.lbBtn:hover { background:rgba(255,214,138,0.15); }
+  #achToast { position:absolute; top:150px; left:50%; transform:translate(-50%,-20px); opacity:0; transition:opacity .35s, transform .35s;
+    background:rgba(20,14,6,0.88); border:1px solid rgba(255,214,138,0.7); border-radius:12px; padding:10px 22px; text-align:center; pointer-events:none; z-index:30; }
+  #achToast.show { opacity:1; transform:translate(-50%,0); }
+  #achToast small { display:block; font-size:10px; letter-spacing:3px; color:#ffd68a; opacity:0.8; }
+  #achToast b { display:block; font-size:16px; letter-spacing:2px; color:#fff2c0; margin:3px 0 2px; }
+  #achToast span { font-size:12px; color:#c9d3ea; }
+  #achList { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:10px; }
+  .ach { border:1px solid rgba(255,255,255,0.14); border-radius:10px; padding:10px 12px; opacity:0.55; }
+  .ach.done { opacity:1; border-color:rgba(255,214,138,0.6); background:rgba(255,214,138,0.07); }
+  .ach b { display:block; font-size:13px; letter-spacing:1px; color:#e8ecf5; }
+  .ach.done b { color:#ffd68a; }
+  .ach span { display:block; font-size:12px; color:#9fb0d0; margin-top:3px; }
+  .ach em { display:block; font-size:11px; color:#7ad6ff; margin-top:4px; font-style:normal; }
+  #achScreen, #lbScreen, #profileScreen { background:rgba(8,10,18,0.97); }
   .padFocus { outline:3px solid #ffd68a; outline-offset:3px; }
   button.lbBtn.danger { border-color:rgba(255,120,120,0.55); color:#ff9a9a; }
   button.lbBtn.danger:hover { background:rgba(255,120,120,0.15); }
@@ -260,6 +274,7 @@
       <div class="bar-shell"><div id="hpFill" class="bar-fill hp-fill" style="width:100%"></div><div class="bar-label">HP</div><div class="bar-pct" id="hpPct">100%</div></div>
       <div class="bar-shell"><div id="stFill" class="bar-fill st-fill" style="width:100%"></div><div class="bar-label">ENERGY</div></div>
       <div id="combo"></div>
+      <div id="achToast"><small>ACHIEVEMENT UNLOCKED</small><b id="achToastName"></b><span id="achToastDesc"></span></div>
       <div id="bossBar"><div id="bossName"><span id="bossTitle"></span><span id="bossPhase"></span></div><div id="bossTrack"><div id="bossFill"></div><i style="left:34%"></i><i style="left:67%"></i></div></div>
     </div>
     <div id="cheatIndicator">⚡ OVERDRIVE ⚡</div>
@@ -301,7 +316,7 @@
     </div>
     <div id="worldRoadmap" class="world-roadmap"></div>
     <div id="worldHint"></div>
-    <div id="buildTag" style="position:absolute; bottom:10px; right:14px; font-size:10px; letter-spacing:2px; color:#5d6b88;">BUILD NOV-01-C</div>
+    <div id="buildTag" style="position:absolute; bottom:10px; right:14px; font-size:10px; letter-spacing:2px; color:#5d6b88;">BUILD NOV-12-A</div>
     <div class="profile-bar">
       <span id="profileName"></span>
       <button class="lbBtn" id="btnSwitchProfile">SWITCH PROFILE</button>
@@ -309,6 +324,7 @@
     </div>
     <button class="play" id="btnStart">ENTER THE MAZE</button>
     <button class="lbBtn" id="btnLeaderboard" style="display:none;">🏆 LEADERBOARD</button>
+    <button class="lbBtn" id="btnAchievements">🏅 ACHIEVEMENTS</button>
   </div>
 
   <div id="lbScreen" class="screen hidden">
@@ -359,6 +375,13 @@
   </div>
 
   <button id="titleBtn" title="Return to title screen">🏠</button>
+
+  <div id="achScreen" class="screen hidden">
+    <div class="title" style="font-size:34px;">ACHIEVEMENTS</div>
+    <div class="subtitle" id="achSummary"></div>
+    <div class="panel" style="max-width:760px; width:92vw; max-height:56vh; overflow-y:auto; text-align:left;"><div id="achList"></div></div>
+    <button class="play" id="btnAchClose">BACK</button>
+  </div>
 
   <div id="profileScreen" class="screen hidden">
     <div class="title" style="font-size:34px;">PROFILES</div>
@@ -437,6 +460,7 @@ const sfx = {
   kill: ()=>{beep({freq:520,slideTo:900,dur:0.18,type:'triangle',vol:0.2}); beep({freq:260,dur:0.18,type:'sine',vol:0.1,delay:0.05});},
   dash: ()=>beep({freq:600,slideTo:200,dur:0.12,type:'sine',vol:0.12}),
   portal: ()=>{beep({freq:200,slideTo:800,dur:0.5,type:'sine',vol:0.18}); beep({freq:400,slideTo:1200,dur:0.6,type:'triangle',vol:0.1,delay:0.1});},
+  achieve: ()=>{ beep({freq:880,dur:0.12,type:'triangle',vol:0.08}); setTimeout(()=>beep({freq:1320,dur:0.22,type:'triangle',vol:0.08}),110); },
   clang: ()=>{
     beep({freq:1850,dur:0.38,type:'square',vol:0.07});
     beep({freq:2760,dur:0.30,type:'triangle',vol:0.10});
@@ -709,6 +733,9 @@ const UPGRADE_DEFS = [
   { id:'regen',     name:'Second Wind',desc:'+1 HP/sec Regen',   baseCost:10, growth:1.25, max:8 },
   { id:'fortune',   name:'Fortune',    desc:'+1% Crit Chance',   baseCost:14, growth:1.25, max:10 },
 ];
+let achieved = {};
+let lifetime = {kills:0, deflects:0, dashes:0, bossKills:0, upgrades:0};
+let levelHurt = false;
 let upgradeWorld = 0; // which world the current upgrades were earned in
 let upgrades = { vitality:0, energy:0, power:0, swiftness:0, regen:0, fortune:0 };
 const COSMETICS = {
@@ -782,6 +809,9 @@ function computeBaseStats(){
 }
 
 function spawnLevel(lv){
+  levelHurt = false;
+  if(lv>=10) award('depth10');
+  if(lv>=CROSSROADS_LEVEL) award('crossroads');
   document.getElementById('bossBar').style.display='none';
   const c = Math.min(18 + Math.floor(lv*2), 58);
   const r = Math.min(14 + Math.floor(lv*1.6), 44);
@@ -939,6 +969,7 @@ function updateEnemyTag(){
 
 function updateGoldTag(){
   saveProfile();
+  if(gold>=1000 && (state==='playing'||state==='shop')) award('hoarder');
   renderProfileBar();
   document.getElementById('goldTag').textContent = '🪙 '+gold;
 }
@@ -1029,7 +1060,7 @@ function padMenu(edge, dx, dy){
   btns[menuSel].classList.add('padFocus');
   if(edge(0)||edge(9)) btns[menuSel].click();
   else if(edge(1)){
-    const back = {profileScreen:'btnProfileBack', lbScreen:'btnLbClose', confirmQuitScreen:'btnCancelQuit', confirmTitleScreen:'btnCancelTitle'}[top.id];
+    const back = {profileScreen:'btnProfileBack', lbScreen:'btnLbClose', achScreen:'btnAchClose', confirmQuitScreen:'btnCancelQuit', confirmTitleScreen:'btnCancelTitle'}[top.id];
     if(back) document.getElementById(back).click();
   }
 }
@@ -1249,11 +1280,13 @@ function tryAttack(){
     spawnParticles(pr.x,pr.y,12,'#fff2c0',140);
     floatText(pr.x, pr.y-8, 'DEFLECT!', '#ffe9a8');
     sfx.clang();
+    lifetime.deflects++; award('deflect'); if(lifetime.deflects>=50) award('deflector');
     camShake = Math.max(camShake,4);
     hitAny=true;
   }
   if(hitAny){
     comboCount++; comboTimer=1.6;
+    if(comboCount>=5) award('combo');
     const el=document.getElementById('combo');
     el.textContent = isCrit ? (comboCount>1? comboCount+'x CRIT!' : 'CRITICAL!') : (comboCount>1 ? (comboCount+'x COMBO') : 'HIT');
     el.style.color = isCrit ? '#ff5a5a' : '#ff9f4a';
@@ -1269,12 +1302,21 @@ function damageEnemy(en, dmg, nx, ny, isCrit){
   if(en.shield>0 && dmg < en.maxHp*5){ floatText(en.x, en.y-40, 'IMMUNE', '#cfe3ff'); return; }
   en.hp -= dmg;
   en.hitFlash = 0.2;
+  if(isCrit) award('crit');
   spawnParticles(en.x, en.y, isCrit?18:10, isCrit?'#ffe15a':'#ffb347', isCrit?130:90);
   if(isCrit) floatText(en.x, en.y-10, 'CRIT -'+Math.round(dmg), '#ff5a5a');
   en.x += nx*8; en.y += ny*8;
   sfx.hit();
   if(en.hp<=0 && en.alive){
     en.alive=false; runKills++;
+    lifetime.kills++;
+    award('firstblood');
+    if(lifetime.kills>=100) award('slayer');
+    if(lifetime.kills>=1000) award('exterminator');
+    if(en.type==='boss'){
+      lifetime.bossKills++; award('boss');
+      if(!levelHurt) award('flawless');
+    }
     if(en.type==='boss') document.getElementById('bossBar').style.display='none';
     spawnParticles(en.x, en.y, en.type==='boss'?44:26, en.type==='ranged'?'#c07bff':(en.type==='boss'?'#ffd166':'#ff6b6b'), en.type==='boss'?220:160);
     score += 100 + level*10;
@@ -1329,6 +1371,7 @@ function update(dt){
   if(player.dashTimer>0){ spd*=2.6; }
   if((keys['shift']||keys['control']||pad.dash) && player.stamina>18 && player.dashTimer<=0 && moving){
     player.dashTimer = 0.18;
+    lifetime.dashes++; if(lifetime.dashes>=50) award('dasher');
     player.stamina -= 24;
     player.invuln = 0.22;
     sfx.dash();
@@ -1498,6 +1541,7 @@ function update(dt){
           const dd = Math.hypot(p.vx,p.vy)||1;
           const dmg = (18 + level*1.4) * player.dmgMult * (cheatMode?5:1) * 1.5;
           damageEnemy(en, dmg, p.vx/dd, p.vy/dd, false);
+          if(!en.alive) award('ownshot');
           floatText(en.x, en.y-24, 'REFLECTED', '#ffe9a8');
           spawnParticles(p.x,p.y,10,'#ffd68a',110);
           p.life=0;
@@ -1542,6 +1586,7 @@ function update(dt){
     tablet.t += dt;
     if(Math.hypot(player.x-tablet.x, player.y-tablet.y) < 34 && tabletMsgTimer<=0){
       tabletMsgTimer = 7;
+      award('tablet');
       document.getElementById('tabletCode').textContent = lastInput==='pad' ? '→  ↓  ←  ↑  B' : 'Z Q X J K';
       document.getElementById('tabletMsg').style.display='block';
     }
@@ -1564,6 +1609,7 @@ function update(dt){
 
 function advanceLevel(){
   sfx.portal();
+  if(!levelHurt && level>=3) award('untouchable');
   score += 250;
   gold += 30 + level*3;
   document.getElementById('scoreTag').textContent = score;
@@ -1687,6 +1733,7 @@ function buyUpgrade(id){
   if(gold < cost) return;
   gold -= cost;
   upgrades[id]++;
+  lifetime.upgrades++; award('shopper'); if(lifetime.upgrades>=10) award('investor');
   const stats = computeBaseStats();
   // apply immediately so headroom shows up right away rather than waiting for next level
   player.maxHp = stats.maxHp; player.maxStamina = stats.maxStamina;
@@ -1704,6 +1751,7 @@ function equipOrBuyCosmetic(id){
     gold -= c.cost;
     cosmetics.unlocked.push(id);
     cosmetics.equipped = id;
+    award('style');
     updateGoldTag();
   }
   renderShop();
@@ -1715,6 +1763,8 @@ function triggerVictory(){
   finishRun('victory');
   sfx.portal();
   const ending = getEnding();
+  award('world_'+currentWorld);
+  if(ending === ENDINGS.ascension || ending === ENDINGS.voidAscension || ending === ENDINGS.genesis) award('ascension');
   if(ending === ENDINGS.ascension && currentWorld < 4){ ascendedWorlds[currentWorld] = true; }
   if(ending === ENDINGS.voidAscension && currentWorld === 4){ voidAscended = true; }
 
@@ -1767,6 +1817,7 @@ function hurtPlayer(nx, ny, attacker){
     }
     return;
   }
+  levelHurt = true;
   const isCrit = Math.random() < (0.2 + (getStoryPath().enemyCritBonus||0));
   const dmg = player.maxHp * (isCrit ? 0.02 : 0.01);
   player.hp -= dmg;
@@ -2644,6 +2695,86 @@ document.getElementById('btnLbClose').addEventListener('click', ()=>document.get
 document.getElementById('lbName').addEventListener('keydown', e=>{ e.stopPropagation(); if(e.key==='Enter') saveCallsign(); });
 document.getElementById('lbName').addEventListener('keyup', e=>e.stopPropagation());
 
+// ---------- ACHIEVEMENTS ----------
+const WORLD_ACH = WORLDS.map((w,i)=>({
+  id:'world_'+i, name: w.name+' Conquered', desc:'Defeat the boss of '+w.name+'.', secret: !!w.secret || i>=4
+}));
+const ACHIEVEMENTS = [
+  {id:'firstblood', name:'First Blood', desc:'Defeat your first enemy.'},
+  {id:'slayer', name:'Slayer', desc:'Defeat 100 enemies.', prog:()=>[lifetime.kills,100]},
+  {id:'exterminator', name:'Exterminator', desc:'Defeat 1,000 enemies.', prog:()=>[lifetime.kills,1000]},
+  {id:'crit', name:'Critical Thinking', desc:'Land a critical hit.'},
+  {id:'combo', name:'Combo Master', desc:'Chain a 5x combo.'},
+  {id:'deflect', name:'Not Today', desc:'Knock an enemy projectile back with your blade.'},
+  {id:'ownshot', name:'Friendly Fire', desc:'Defeat an enemy with its own deflected shot.'},
+  {id:'deflector', name:'Wall of Steel', desc:'Deflect 50 projectiles.', prog:()=>[lifetime.deflects,50]},
+  {id:'dasher', name:'Quick Feet', desc:'Dash 50 times.', prog:()=>[lifetime.dashes,50]},
+  {id:'shopper', name:'Armory Regular', desc:'Buy an upgrade.'},
+  {id:'investor', name:'Investor', desc:'Buy 10 upgrades.', prog:()=>[lifetime.upgrades,10]},
+  {id:'style', name:'Fashionista', desc:'Buy a cosmetic.'},
+  {id:'hoarder', name:'Dragon Hoard', desc:'Hold 1,000 gold at once.'},
+  {id:'depth10', name:'Going Deeper', desc:'Reach depth 10 in any world.'},
+  {id:'crossroads', name:'At the Crossroads', desc:'Reach the Crossroads.'},
+  {id:'untouchable', name:'Untouchable', desc:'Clear a level (depth 3 or deeper) without taking a hit.'},
+  {id:'boss', name:'Boss Slayer', desc:'Defeat a world boss.'},
+  {id:'flawless', name:'Flawless Victory', desc:'Defeat a world boss without taking a hit.'},
+  ...WORLD_ACH,
+  {id:'ascension', name:'???', realName:'Ascended', desc:'Reach the highest ending of a world.', secret:true},
+  {id:'tablet', name:'???', realName:'Archaeologist', desc:'Find something that was meant to stay hidden.', secret:true},
+];
+let achQueue = [], achShowing = false;
+function achCount(){ return ACHIEVEMENTS.filter(a=>achieved[a.id]).length; }
+function updateAchButton(){
+  const b = document.getElementById('btnAchievements');
+  if(b) b.textContent = '🏅 ACHIEVEMENTS ('+achCount()+'/'+ACHIEVEMENTS.length+')';
+}
+function award(id){
+  if(achieved[id] || runUsedCheats || profileLoading) return;
+  const a = ACHIEVEMENTS.find(x=>x.id===id);
+  if(!a) return;
+  achieved[id] = Date.now();
+  achQueue.push(a);
+  updateAchButton();
+  saveProfile();
+  if(!achShowing) showNextAch();
+}
+function showNextAch(){
+  const a = achQueue.shift();
+  const el = document.getElementById('achToast');
+  if(!a){ achShowing=false; return; }
+  achShowing = true;
+  document.getElementById('achToastName').textContent = a.realName || a.name;
+  document.getElementById('achToastDesc').textContent = a.desc;
+  el.classList.add('show');
+  sfx.achieve();
+  setTimeout(()=>{ el.classList.remove('show'); setTimeout(showNextAch, 450); }, 3200);
+}
+function renderAchievements(){
+  const list = document.getElementById('achList');
+  list.innerHTML = '';
+  document.getElementById('achSummary').textContent = achCount()+' of '+ACHIEVEMENTS.length+' unlocked';
+  for(const a of ACHIEVEMENTS){
+    const done = !!achieved[a.id];
+    const d = document.createElement('div');
+    d.className = 'ach'+(done?' done':'');
+    const n = document.createElement('b');
+    n.textContent = done ? (a.realName||a.name) : (a.secret ? '???' : a.name);
+    const t = document.createElement('span');
+    t.textContent = done || !a.secret ? a.desc : 'A secret.';
+    d.appendChild(n); d.appendChild(t);
+    if(a.prog && !done){
+      const [v,m] = a.prog();
+      const p = document.createElement('em'); p.textContent = Math.min(v,m)+' / '+m; d.appendChild(p);
+    }
+    list.appendChild(d);
+  }
+}
+document.getElementById('btnAchievements').addEventListener('click', ()=>{
+  renderAchievements();
+  document.getElementById('achScreen').classList.remove('hidden');
+});
+document.getElementById('btnAchClose').addEventListener('click', ()=>document.getElementById('achScreen').classList.add('hidden'));
+
 // ---------- PROFILES ----------
 // Each profile is a save slot (gold, upgrades, cosmetics, unlocked worlds) kept in this browser.
 const PROFILE_KEY = 'lb_profiles_v1', PROFILE_SLOTS = 3;
@@ -2660,7 +2791,9 @@ function blankProfile(){
     ascendedWorlds:[false,false,false,false],
     voidAscended:false,
     currentWorld:0,
-    upgradeWorld:0
+    upgradeWorld:0,
+    achieved:{},
+    lifetime:{kills:0, deflects:0, dashes:0, bossKills:0, upgrades:0}
   };
 }
 function snapshotProfile(){
@@ -2670,7 +2803,8 @@ function snapshotProfile(){
     gold, upgrades:{...upgrades},
     cosmetics:{ unlocked:[...cosmetics.unlocked], equipped:cosmetics.equipped },
     worldsUnlocked:[...worldsUnlocked], ascendedWorlds:[...ascendedWorlds],
-    voidAscended, currentWorld, upgradeWorld
+    voidAscended, currentWorld, upgradeWorld,
+    achieved:{...achieved}, lifetime:{...lifetime}
   };
 }
 function readProfileStore(){
@@ -2702,7 +2836,10 @@ function applyProfile(pr){
   voidAscended = !!pr.voidAscended;
   currentWorld = (pr.currentWorld>=0 && pr.currentWorld<WORLDS.length && worldsUnlocked[pr.currentWorld]) ? pr.currentWorld : 0;
   upgradeWorld = (pr.upgradeWorld>=0 && pr.upgradeWorld<WORLDS.length) ? pr.upgradeWorld : currentWorld;
+  achieved = {...(pr.achieved||{})};
+  lifetime = {...b.lifetime, ...(pr.lifetime||{})};
   profileLoading = false;
+  updateAchButton();
   document.getElementById('goldTag').textContent = '🪙 '+gold;
   renderWorldRoadmap();
   renderProfileBar();
